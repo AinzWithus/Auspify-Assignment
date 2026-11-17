@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auspify — Online Examination Portal</title>
+  <style>
+    :root {
+      --primary: #1e3a8a;
+      --accent: #2563eb;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    header {
+      background: var(--primary); color: #fff; padding: 14px 24px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; }
+    .container { max-width: 1050px; margin: 24px auto; padding: 0 16px; }
+    .card {
+      background: var(--card); border-radius: 10px; padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 18px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .badge {
+      display: inline-block; padding: 3px 9px; border-radius: 999px;
+      font-size: 0.75rem; font-weight: 600; background: #dbeafe; color: var(--primary);
+    }
+    input, select {
+      padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem;
+    }
+    button {
+      background: var(--accent); color: #fff; border: none; padding: 9px 16px;
+      border-radius: 6px; cursor: pointer; font-weight: 600;
+    }
+    button:hover { background: var(--primary); }
+    button.secondary { background: #475569; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+    .toolbar input { flex: 1; min-width: 220px; }
+    .hidden { display: none; }
+    .question-box { border-bottom: 1px solid #e2e8f0; padding: 14px 0; }
+    .option-label { display: block; margin: 6px 0; cursor: pointer; }
+    .timer { font-weight: 700; color: #dc2626; font-size: 1.05rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Auspify Online Examination System</h1>
+    <div id="user-nav" class="hidden">
+      <span id="welcome-text" style="margin-right: 12px;"></span>
+      <button class="secondary" onclick="showHistory()">My Results</button>
+      <button class="secondary" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- STEP 1: AUTHENTICATION SCREEN -->
+    <div id="auth-screen" class="card" style="max-width: 440px; margin: 40px auto;">
+      <h2 id="auth-title">Student Login</h2>
+      <p id="auth-msg" style="color: #dc2626; font-size: 0.9rem;"></p>
+      <div id="register-fields" class="hidden" style="margin-bottom: 10px;">
+        <input id="reg-name" type="text" placeholder="Full Name" style="width: 100%; margin-bottom: 10px;" />
+      </div>
+      <input id="auth-user" type="text" placeholder="Username" style="width: 100%; margin-bottom: 10px;" />
+      <input id="auth-pass" type="password" placeholder="Password" style="width: 100%; margin-bottom: 14px;" />
+      <button id="auth-btn" style="width: 100%;" onclick="submitAuth()">Log In</button>
+      <p style="text-align: center; margin-top: 14px; font-size: 0.9rem;">
+        <a href="#" onclick="toggleAuthMode()" id="toggle-link">Need an account? Register here</a>
+      </p>
+    </div>
+
+    <!-- STEP 2, 3 & 4: DYNAMIC EXAM CATALOG, DETAILS, SEARCH & FILTER -->
+    <div id="catalog-screen" class="hidden">
+      <div class="card">
+        <div class="toolbar">
+          <input id="search-input" type="text" placeholder="Search exams by title, code, or topic..." oninput="debouncedSearch()" />
+          <select id="category-filter" onchange="loadExams()">
+            <option value="All">All Categories</option>
+            <option value="Programming">Programming</option>
+            <option value="Databases">Databases</option>
+            <option value="Web Development">Web Development</option>
+          </select>
+          <select id="difficulty-filter" onchange="loadExams()">
+            <option value="All">All Levels</option>
+            <option value="Beginner">Beginner</option>
+            <option value="Intermediate">Intermediate</option>
+            <option value="Advanced">Advanced</option>
+          </select>
+        </div>
+        <div id="exam-grid" class="grid"></div>
+      </div>
+    </div>
+
+    <!-- ACTIVE EXAM RUNNER SCREEN -->
+    <div id="exam-screen" class="hidden card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 id="active-exam-title" style="margin: 0;"></h2>
+        <span class="timer" id="exam-timer"></span>
+      </div>
+      <p id="active-exam-desc" style="color: var(--muted);"></p>
+      <div id="questions-container"></div>
+      <div style="margin-top: 18px; display: flex; gap: 10px;">
+        <button onclick="submitExam()">Submit Examination</button>
+        <button class="secondary" onclick="backToCatalog()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- RESULTS HISTORY SCREEN -->
+    <div id="history-screen" class="hidden card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>My Examination Results</h2>
+        <button class="secondary" onclick="backToCatalog()">Back to Exams</button>
+      </div>
+      <div id="history-list"></div>
+    </div>
+  </div>
+
+  <script>
+    let isRegisterMode = false;
+    let session = null;
+    let activeExam = null;
+    let timerInterval = null;
+    let searchTimer = null;
+
+    function toggleAuthMode() {
+      isRegisterMode = !isRegisterMode;
+      document.getElementById("auth-title").textContent = isRegisterMode ? "Create Student Account" : "Student Login";
+      document.getElementById("auth-btn").textContent = isRegisterMode ? "Register" : "Log In";
+      document.getElementById("register-fields").classList.toggle("hidden", !isRegisterMode);
+      document.getElementById("toggle-link").textContent = isRegisterMode
+        ? "Already registered? Log in"
+        : "Need an account? Register here";
+      document.getElementById("auth-msg").textContent = "";
+    }
+
+    async function submitAuth() {
+      const username = document.getElementById("auth-user").value;
+      const password = document.getElementById("auth-pass").value;
+      const full_name = document.getElementById("reg-name").value;
+      const msgEl = document.getElementById("auth-msg");
+
+      const endpoint = isRegisterMode ? "/api/register" : "/api/login";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, full_name })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        msgEl.style.color = "#dc2626";
+        msgEl.textContent = data.error || data.message;
+        return;
+      }
+
+      if (isRegisterMode) {
+        toggleAuthMode();
+        msgEl.style.color = "#16a34a";
+        msgEl.textContent = data.message;
+        return;
+      }
+
+      session = data.session;
+      document.getElementById("auth-screen").classList.add("hidden");
+      document.getElementById("user-nav").classList.remove("hidden");
+      document.getElementById("welcome-text").textContent = `Hi, ${session.full_name}`;
+      backToCatalog();
+    }
+
+    // Step 5: Debounced search prevents firing API requests on every single keystroke
+    function debouncedSearch() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(loadExams, 250);
+    }
+
+    async function loadExams() {
+      const search = encodeURIComponent(document.getElementById("search-input").value);
+      const category = encodeURIComponent(document.getElementById("category-filter").value);
+      const difficulty = encodeURIComponent(document.getElementById("difficulty-filter").value);
+
+      const res = await fetch(`/api/exams?search=${search}&category=${category}&difficulty=${difficulty}`);
+      const data = await res.json();
+      const grid = document.getElementById("exam-grid");
+
+      if (!data.exams.length) {
+        grid.innerHTML = "<p>No exams match your search filters.</p>";
+        return;
+      }
+
+      // Render cards dynamically using DocumentFragment for smooth UI updates
+      const frag = document.createDocumentFragment();
+      data.exams.forEach(exam => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.style.margin = "0";
+        card.innerHTML = `
+          <span class="badge">${exam.category} • ${exam.difficulty}</span>
+          <h3 style="margin: 10px 0 6px;">${exam.title}</h3>
+          <p style="color: var(--muted); font-size: 0.9rem;">${exam.description}</p>
+          <p style="font-size: 0.85rem;"><strong>Code:</strong> ${exam.code} | <strong>Questions:</strong> ${exam.question_count} | <strong>Time:</strong> ${exam.duration_mins} mins</p>
+          <button onclick="startExam(${exam.id})">Start Exam</button>
+        `;
+        frag.appendChild(card);
+      });
+      grid.innerHTML = "";
+      grid.appendChild(frag);
+    }
+
+    async function startExam(examId) {
+      const res = await fetch(`/api/exams/${examId}`, {
+        headers: { "Authorization": `Bearer ${session.token}` }
+      });
+      const exam = await res.json();
+      if (!res.ok) {
+        alert(exam.error);
+        return;
+      }
+
+      activeExam = exam;
+      document.getElementById("catalog-screen").classList.add("hidden");
+      document.getElementById("history-screen").classList.add("hidden");
+      document.getElementById("exam-screen").classList.remove("hidden");
+
+      document.getElementById("active-exam-title").textContent = `${exam.code}: ${exam.title}`;
+      document.getElementById("active-exam-desc").textContent = exam.description;
+
+      const container = document.getElementById("questions-container");
+      container.innerHTML = exam.questions.map((q, idx) => `
+        <div class="question-box">
+          <p><strong>Q${idx + 1}. ${q.prompt}</strong></p>
+          ${["A", "B", "C", "D"].map(opt => `
+            <label class="option-label">
+              <input type="radio" name="q_${q.id}" value="${opt}" />
+              ${opt}. ${q["option_" + opt.toLowerCase()]}
+            </label>
+          `).join("")}
+        </div>
+      `).join("");
+
+      startCountdown(exam.duration_mins * 60);
+    }
+
+    function startCountdown(seconds) {
+      clearInterval(timerInterval);
+      let remaining = seconds;
+      const timerEl = document.getElementById("exam-timer");
+
+      const tick = () => {
+        const mins = String(Math.floor(remaining / 60)).padStart(2, "0");
+        const secs = String(remaining % 60).padStart(2, "0");
+        timerEl.textContent = `Time Left: ${mins}:${secs}`;
+        if (remaining <= 0) {
+          clearInterval(timerInterval);
+          submitExam();
+        }
+        remaining--;
+      };
+      tick();
+      timerInterval = setInterval(tick, 1000);
+    }
+
+    async function submitExam() {
+      clearInterval(timerInterval);
+      const answers = {};
+      activeExam.questions.forEach(q => {
+        const selected = document.querySelector(`input[name="q_${q.id}"]:checked`);
+        if (selected) answers[q.id] = selected.value;
+      });
+
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.token}`
+        },
+        body: JSON.stringify({ exam_id: activeExam.id, answers })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Exam Submitted!\nScore: ${data.result.score} / ${data.result.total} (${data.result.percentage}%)`);
+        showHistory();
+      }
+    }
+
+    async function showHistory() {
+      clearInterval(timerInterval);
+      document.getElementById("catalog-screen").classList.add("hidden");
+      document.getElementById("exam-screen").classList.add("hidden");
+      document.getElementById("history-screen").classList.remove("hidden");
+
+      const res = await fetch("/api/results", {
+        headers: { "Authorization": `Bearer ${session.token}` }
+      });
+      const data = await res.json();
+      const list = document.getElementById("history-list");
+
+      if (!data.results.length) {
+        list.innerHTML = "<p>You haven't completed any exams yet.</p>";
+        return;
+      }
+
+      list.innerHTML = data.results.map(r => `
+        <div class="question-box">
+          <strong>${r.code} — ${r.title}</strong><br/>
+          Score: <strong>${r.score}/${r.total}</strong> • Completed on ${r.submitted_at}
+        </div>
+      `).join("");
+    }
+
+    function backToCatalog() {
+      clearInterval(timerInterval);
+      document.getElementById("exam-screen").classList.add("hidden");
+      document.getElementById("history-screen").classList.add("hidden");
+      document.getElementById("catalog-screen").classList.remove("hidden");
+      loadExams();
+    }
+
+    async function logout() {
+      await fetch("/api/logout", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.token}` }
+      });
+      session = null;
+      document.getElementById("user-nav").classList.add("hidden");
+      document.getElementById("catalog-screen").classList.add("hidden");
+      document.getElementById("exam-screen").classList.add("hidden");
+      document.getElementById("history-screen").classList.add("hidden");
+      document.getElementById("auth-screen").classList.remove("hidden");
+    }
+  </script>
+</body>
+</html>
